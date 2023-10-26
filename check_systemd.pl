@@ -3,9 +3,9 @@
 #---------------------------------------------------------------------------
 #  Author(s): hbrennhaeuser
 #  Created: Jan 23, 2022
-#  Last modified: Oct 4, 2023
+#  Last modified: Oct 10, 2023
 #  License: GPL v3
-#  Version: 1.0.3
+#  Version: 1.1.0
 #
 #  License information:
 #    This program is free software: you can redistribute it and/or modify
@@ -21,23 +21,27 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Changelog: 
-#    v1.0.0  - hbrennhaeuser, 04 Oct, 2023
-#              Rename from check_systemctl.pl to check_systemd.pl
-#              Major rewrite aiming to 
-#                  ... match features and behavior of Friedrich/check_systemd v2.0.9
-#                  ... be able to run on more systems without requiring installation of additional libraries
-#                  ... provide better code quality
+#  Changelog:
+#    v1.1.0 - hbrennhaeuser, Oct 10, 2023
+#             Remove support for --output=json (remove JSON::Parse requirement)
+#    v1.0.4 - hbrennhaeuser, Oct 04, 2023
+#             Minor Changes
+#    v1.0.0 - hbrennhaeuser, 04 Oct, 2023
+#             Rename from check_systemctl.pl to check_systemd.pl
+#             Major rewrite aiming to 
+#                 ... match features and behavior of Friedrich/check_systemd v2.0.9
+#                 ... be able to run on more systems without requiring installation of additional libraries
+#                 ... provide better code quality
 #
 #---------------------------------------------------------------------------
 
 use warnings;
 use strict;
 
-use JSON::Parse qw(parse_json);
+# This plugin is intentionally using as few libraries as possible.
 use Getopt::Long;
 
-our $VERSION = '1.0.3';
+our $VERSION = '1.1.0';
 
 my $MP_OK = 0;
 my $MP_WARNING = 1;
@@ -62,7 +66,7 @@ Nagios / Icinga compatible monitoring plugin to check systemd for failed units!
 SYNTAX: check_systemd.pl [-u <UNIT> | -e <UNIT>] [-l] [-v] [-h]
             -u, --unit <UNIT>       - Specific full unit name to be checked
             -e, --exclude <REGEX>   - Exclude units using regex. May be specified multiple times. Does not apply if --unit is being used.
-            -l, --legacy            - Legacy mode, enable for systemd versions without support for --output=json
+            -l, --legacy            - [Unused] This argument does nothing. It remains for backwards-compatibility-reasons
             -v, --verbose           - Enable verbose output
             -h, --help              - Print this message
 ");
@@ -106,19 +110,6 @@ sub check_exclude {
     }
     return $out;
 }
-
-
-sub query_systemd_units_json {
-    my $cmd="systemctl list-units --all --full --output=json --no-pager";
-    my @out=`$cmd`;
-
-    my $units = parse_json($out[0]);
-
-
-    return ($units);
-}
-
-
 
 sub query_systemd_units {
 
@@ -167,12 +158,7 @@ sub query_systemd_units {
 
 
 
-my ($units);
-if ( $opt->{'legacy'} ){
-    ($units) = query_systemd_units();
-} else {
-    ($units) = query_systemd_units_json();
-}
+my ($units) = query_systemd_units();
 
 
 if ($opt->{'unit'}){
