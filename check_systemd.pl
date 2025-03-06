@@ -3,9 +3,9 @@
 #---------------------------------------------------------------------------
 #  Author(s): hbrennhaeuser
 #  Created: Jan 23, 2022
-#  Last modified: Feb 03, 2025
+#  Last modified: Feb 06, 2025
 #  License: GPL v3
-#  Version: 1.2.0
+#  Version: 1.2.1
 #
 #  License information:
 #    This program is free software: you can redistribute it and/or modify
@@ -22,6 +22,9 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 #  Changelog:
+#    v1.2.1 - hbrennhaeuser, Feb 03, 2025
+#             Fix GetOptions -w and -c
+#             Fix wrong ActiveEnterTimestamp human readable format
 #    v1.2.0 - hbrennhaeuser, Feb 03, 2025
 #             Add optional check of ActiveEnterTimestamp
 #    v1.1.0 - hbrennhaeuser, Oct 10, 2023
@@ -44,9 +47,8 @@ use 5.010;
 # This plugin is intentionally using as few libraries as possible.
 use Getopt::Long;
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
-use Time::Piece;
 
-our $VERSION = '1.2.0';
+our $VERSION = '1.2.1';
 our $SHORTNAME = "SYSTEMD";
 our %MP_CODES = (
     OK       => 0,
@@ -91,13 +93,15 @@ Getopt::Long::GetOptions(
     'unit|u=s'          => \$opt->{'unit'},
     'exclude|e=s@'      => \$opt->{'exclude'},
     'legacy|l'          => \$opt->{'legacy'},
-    'warning|w'          => \$opt->{'warning'},
-    'critical|c'          => \$opt->{'critical'},
+    'warning|w=s'       => \$opt->{'warning'},
+    'critical|c=s'      => \$opt->{'critical'},
     'verbose|v'         => \$opt->{'verbose'},
     'help|h'            => \$opt->{'help'},
 );
 
 print_help() if (defined($opt->{'help'}));
+plugin_die("Warning threshold must be an integer.") if (defined($opt->{'warning'}) && $opt->{'warning'} !~ /^\d+$/);
+plugin_die("Critical threshold must be an integer.") if (defined($opt->{'critical'}) && $opt->{'critical'} !~ /^\d+$/);
 
 # ========================
 
@@ -183,6 +187,16 @@ sub get_systemd_unit_parameters {
     return \%unit_params;
 }
 
+sub format_duration {
+    my $seconds = shift;
+
+    my $hours   = int($seconds / 3600);
+    my $minutes = int(($seconds % 3600) / 60);
+    my $secs    = $seconds % 60;
+
+    return sprintf("%02dh:%02dm:%02ds", $hours, $minutes, $secs);
+}
+
 sub plugin_die {
     my ($et) = @_;
     plugin_exit($MP_CODES{UNKNOWN}, $et);
@@ -199,6 +213,10 @@ sub plugin_exit {
     exit $ec;
 }
 
+sub verb {
+    my ($text) = @_;
+    print STDERR "[DEBUG] $text\n" if ($opt->{'verbose'});
+}
 # ========================
 
 my ($units) = get_systemd_units();
@@ -212,6 +230,7 @@ if ($opt->{'unit'}) {
         }
 
         if ($unit_active_state eq 'active' && (defined($opt->{'warning'}) || defined($opt->{'critical'}))) {
+            verb("evaluating ActiveEnterTimestamp");
             my $unit_params = get_systemd_unit_parameters($opt->{'unit'});
             my $active_enter_timestamp = $unit_params->{'ActiveEnterTimestampMonotonic'};
             my $ec_tmp = $MP_CODES{OK};
@@ -220,8 +239,9 @@ if ($opt->{'unit'}) {
             my $time_since_boot = clock_gettime(CLOCK_MONOTONIC);
             my $activeTime = ($time_since_boot * 1_000_000 - $active_enter_timestamp) / 1_000_000;
             $activeTime = int($activeTime);
+            verb("activetime: ${activeTime}s");
 
-            my $activeTime_pretty = Time::Piece->new($activeTime)->strftime('%Hh%Mm%Ss');
+            my $activeTime_pretty = format_duration($activeTime);
             
             if (defined($opt->{'critical'}) && $opt->{'critical'} > $activeTime){
                 set_ec($MP_CODES{CRITICAL});
@@ -232,12 +252,15 @@ if ($opt->{'unit'}) {
                 $ec_tmp = get_new_ec($ec_tmp, $MP_CODES{WARNING});
             }
             $et .= " ActiveEnterTime $MP_TEXTS{$ec_tmp}, ${activeTime_pretty} ago.";
-            $pd .= " 'activeTime'=${activeTime}s;;;0;";
+            # $pd .= " 'activeTime'=${activeTime}s;;;0;";
+            $pd .= " 'activeTime'=${activeTime}s;";
+            $pd .= defined($opt->{'warning'}) ? "$opt->{'warning'};" : ";";
+            $pd .= defined($opt->{'critical'}) ? "$opt->{'critical'};" : ";";
+            $pd .= "0;"
         }
 
     } else {
-        set_ec($MP_CODES{UNKNOWN});
-        $et = $opt->{'unit'}.' could not be found!';
+        plugin_die($opt->{'unit'}.' could not be found!');
     }
 } else {
     my $units_excluded = [];
